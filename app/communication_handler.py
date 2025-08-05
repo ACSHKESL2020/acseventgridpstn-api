@@ -165,6 +165,22 @@ class CommunicationHandler:
                         function_name = message.name
                         call_id = message.call_id
                         
+                        # Provide immediate acknowledgment based on function being called
+                        acknowledgment_messages = {
+                            "lookup_employee": "Let me look that up for you...",
+                            "verify_security_answer": "Let me verify that information...",
+                            "account_recovery": "Let me process the password reset for you..."
+                        }
+                        
+                        if function_name in acknowledgment_messages:
+                            await self.rt_client.ws.send_json({
+                                "type": "response.create",
+                                "response": {
+                                    "modalities": ["text", "audio"],
+                                    "instructions": f'Say: "{acknowledgment_messages[function_name]}" and then wait for the function result.'
+                                }
+                            })
+                        
                         # Handle potential incomplete JSON from OpenAI
                         try:
                             args = json.loads(message.arguments)
@@ -202,14 +218,28 @@ class CommunicationHandler:
                                 }
                             )
 
-                            # If there's a follow-up instruction, send response.create
+                            # Always trigger a response after function call completion
+                            # Agent should immediately acknowledge the result to the user
                             if result.get("follow_up") and result["follow_up"].get("instructions"):
+                                # Use specific follow-up instructions if provided
                                 await self.rt_client.ws.send_json(
                                     {
                                         "type": "response.create",
                                         "response": {
                                             "modalities": ["text", "audio"],
                                             "instructions": result["follow_up"]["instructions"]
+                                        }
+                                    }
+                                )
+                            else:
+                                # Always create a response even without specific follow-up instructions
+                                # Agent should acknowledge the function result immediately
+                                await self.rt_client.ws.send_json(
+                                    {
+                                        "type": "response.create",
+                                        "response": {
+                                            "modalities": ["text", "audio"],
+                                            "instructions": f"Based on the {function_name} result, provide an immediate response to the user. Don't stay silent - acknowledge what happened and guide them to the next step if needed."
                                         }
                                     }
                                 )
@@ -226,6 +256,9 @@ class CommunicationHandler:
                                     }
                                 }
                             )
+                            
+                            # Let Richard handle the error naturally according to system instructions
+                            # Only trigger response for critical errors that require immediate user feedback
 
                         logger.info(f"Function Call Arguments: {message.arguments}")
                         print(f"Function Call Arguments: {message.arguments}")

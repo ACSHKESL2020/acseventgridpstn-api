@@ -39,7 +39,6 @@ from azure.communication.callautomation import (
 
 
 from app.communication_handler import CommunicationHandler
-from app.communication_handler_agent import CommunicationHandlerAgent
 
 # Configuration: Switch between modes
 USE_AGENT_MODE = os.getenv("USE_AGENT_MODE", "false").lower() == "true"
@@ -201,7 +200,9 @@ async def ws(websocket: WebSocket):
     # Choose handler based on configuration
     if USE_AGENT_MODE:
         print("🤖 Using Azure AI Agent Mode with pre-configured assistant")
-        service = CommunicationHandlerAgent(websocket)
+        # Note: Agent mode functionality has been removed - falling back to direct mode
+        print("⚡ Falling back to Direct Realtime API with custom agent config")
+        service = CommunicationHandler(websocket)
     else:
         print("⚡ Using Direct Realtime API with custom agent config")
         service = CommunicationHandler(websocket)

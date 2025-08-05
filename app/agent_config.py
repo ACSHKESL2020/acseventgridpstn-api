@@ -5,9 +5,10 @@ This module defines agent configurations including instructions, voice settings,
 functions, and tools. It separates business logic from communication handling.
 """
 
+import os
 from typing import List, Dict, Any, Optional
 from app.recipe_finder import RecipeFinder
-from app.it_helpdesk_tools import get_it_helpdesk_tools, get_it_helpdesk_system_message
+from app.it_helpdesk_tools import get_it_helpdesk_system_message
 import aiohttp
 import json
 
@@ -143,24 +144,32 @@ class ITHelpdeskConfig(AgentConfig):
     """Configuration for IT Helpdesk Agent (Richard)"""
     
     def __init__(self):
-        # Use localhost for testing since both servers are on same machine
-        # TODO: Switch back to DevTunnel when it's working properly
-        self.base_url = "http://localhost:8081"  # Local Node.js server
+        # Use environment variable for IT tools base URL with fallback
+        self.base_url = os.getenv("IT_TOOLS_BASE_URL", "https://ec631f98f69c.ngrok-free.app")
         
         # Employee lookup function handler
         async def lookup_employee_handler(args: Dict[str, Any]) -> Dict[str, Any]:
-            employee_id = args.get("employeeId", "")
+            employeeId = args.get("employeeId", "")
             
             try:
                 async with aiohttp.ClientSession() as session:
-                    url = f"{self.base_url}/api/v1/test/employees/{employee_id}"
+                    url = f"{self.base_url}/api/v1/test/employees/{employeeId}"
                     async with session.get(url) as response:
                         if response.status == 200:
                             data = await response.json()
-                            return {
-                                "output": json.dumps(data),
-                                "follow_up": None
-                            }
+                            if data.get("success", False):
+                                employee_name = data.get("employee", {}).get("name", "")
+                                return {
+                                    "output": json.dumps(data),
+                                    "follow_up": {
+                                        "instructions": f"Employee lookup successful for {employee_name}. Now you MUST proceed with security verification. Ask the user to answer their security question and then call verify_security_answer."
+                                    }
+                                }
+                            else:
+                                return {
+                                    "output": json.dumps(data),
+                                    "follow_up": None
+                                }
                         else:
                             return {
                                 "output": json.dumps({"success": False, "error": "Employee not found"}),
@@ -175,7 +184,7 @@ class ITHelpdeskConfig(AgentConfig):
         
         # Security verification function handler  
         async def verify_security_answer_handler(args: Dict[str, Any]) -> Dict[str, Any]:
-            employee_id = args.get("employee_id", "")
+            employeeId = args.get("employeeId", "")
             security_answer = args.get("security_answer", "")
             question_type = args.get("question_type", "")
             
@@ -183,16 +192,24 @@ class ITHelpdeskConfig(AgentConfig):
                 async with aiohttp.ClientSession() as session:
                     url = f"{self.base_url}/api/v1/test/verify_security_answer"
                     payload = {
-                        "employee_id": employee_id,
+                        "employeeId": employeeId,
                         "security_answer": security_answer,
                         "question_type": question_type
                     }
                     async with session.post(url, json=payload) as response:
                         data = await response.json()
-                        return {
-                            "output": json.dumps(data),
-                            "follow_up": None
-                        }
+                        if data.get("success", False) and data.get("verified", False):
+                            return {
+                                "output": json.dumps(data),
+                                "follow_up": {
+                                    "instructions": "Security verification successful. Now you MUST proceed with account recovery. Call account_recovery to complete the password reset."
+                                }
+                            }
+                        else:
+                            return {
+                                "output": json.dumps(data),
+                                "follow_up": None
+                            }
             except Exception as e:
                 logger.error(f"Error calling verify_security_answer API: {e}")
                 return {
@@ -202,17 +219,19 @@ class ITHelpdeskConfig(AgentConfig):
         
         # Account recovery function handler
         async def account_recovery_handler(args: Dict[str, Any]) -> Dict[str, Any]:
-            employee_id = args.get("employee_id", "")
+            employeeId = args.get("employeeId", "")
             
             try:
                 async with aiohttp.ClientSession() as session:
                     url = f"{self.base_url}/api/v1/test/account_recovery"
-                    payload = {"employee_id": employee_id}
+                    payload = {"employeeId": employeeId}
                     async with session.post(url, json=payload) as response:
                         data = await response.json()
                         return {
                             "output": json.dumps(data),
-                            "follow_up": None
+                            "follow_up": {
+                                "instructions": "Password reset completed successfully. Inform the user that their password has been reset and they should check their email for further instructions."
+                            }
                         }
             except Exception as e:
                 logger.error(f"Error calling account_recovery API: {e}")
@@ -224,13 +243,13 @@ class ITHelpdeskConfig(AgentConfig):
         # Define IT helpdesk functions
         lookup_employee_function = AgentFunction(
             name="lookup_employee",
-            description="Look up employee information by employee ID from HR SharePoint database. Used for identity verification during IT support requests like password resets.",
+            description="STEP 1: Look up employee information by employee ID from HR SharePoint database. Used for identity verification during IT support requests like password resets. This is the FIRST and REQUIRED step in the password reset workflow.",
             parameters={
                 "type": "object",
                 "properties": {
                     "employeeId": {
                         "type": "string",
-                        "description": "Employee ID provided by caller (format: EMP followed by 4 digits, e.g., 'EMP1029')"
+                        "description": "Employee ID provided by caller (format: EMP followed by numbers, e.g., 'EMP001234')"
                     }
                 },
                 "required": ["employeeId"]
@@ -240,11 +259,11 @@ class ITHelpdeskConfig(AgentConfig):
         
         verify_security_function = AgentFunction(
             name="verify_security_answer",
-            description="Verify caller's security question answer against HR database record. Only call this after successful employee lookup to confirm identity.",
+            description="STEP 2: Verify caller's security question answer against HR database record. Can ONLY be called AFTER successful employee lookup to confirm identity. This step is MANDATORY before account recovery.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "employee_id": {
+                    "employeeId": {
                         "type": "string", 
                         "description": "Employee ID from previous successful lookup"
                     },
@@ -258,23 +277,23 @@ class ITHelpdeskConfig(AgentConfig):
                         "description": "Type of security question being verified - must match the question that was asked"
                     }
                 },
-                "required": ["employee_id", "security_answer", "question_type"]
+                "required": ["employeeId", "security_answer", "question_type"]
             },
             handler=verify_security_answer_handler
         )
         
         account_recovery_function = AgentFunction(
             name="account_recovery",
-            description="Starts the account recovery process for the given employee ID. This can include triggering a password reset and sending email confirmation.",
+            description="STEP 3: Starts the account recovery process for the given employee ID. Can ONLY be called AFTER both successful employee lookup (STEP 1) AND successful security verification (STEP 2). This includes triggering a password reset and sending email confirmation.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "employee_id": {
+                    "employeeId": {
                         "type": "string",
-                        "description": "Employee's unique ID"
+                        "description": "Employee ID that has been successfully looked up and verified"
                     }
                 },
-                "required": ["employee_id"]
+                "required": ["employeeId"]
             },
             handler=account_recovery_handler
         )
