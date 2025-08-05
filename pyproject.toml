@@ -10,6 +10,7 @@ dependencies = [
     "azure-communication-callautomation==1.4.0b1",
     "azure-communication-sms>=1.1.0",
     "azure-eventgrid>=4.21.0",
+    "azure-search-documents>=11.5.3",
     "azure-storage-blob>=12.24.1",
     "beautifulsoup4>=4.12.3",
     "fastapi[standard]>=0.115.8",

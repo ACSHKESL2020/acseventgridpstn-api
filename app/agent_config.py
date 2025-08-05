@@ -9,6 +9,7 @@ import os
 from typing import List, Dict, Any, Optional
 from app.recipe_finder import RecipeFinder
 from app.it_helpdesk_tools import get_it_helpdesk_system_message
+from app.policy_search_tools import search_it_policies_handler
 import aiohttp
 import json
 
@@ -217,6 +218,22 @@ class ITHelpdeskConfig(AgentConfig):
                     "follow_up": None
                 }
         
+        # Policy search function handler
+        async def search_policies_handler(args: Dict[str, Any]) -> Dict[str, Any]:
+            query = args.get("query", "")
+            try:
+                result = search_it_policies_handler(query)
+                return {
+                    "output": result,
+                    "follow_up": None
+                }
+            except Exception as e:
+                logger.error(f"Error searching policies: {e}")
+                return {
+                    "output": "I'm sorry, I couldn't search the policy database at the moment. Please try again later or contact IT support directly.",
+                    "follow_up": None
+                }
+
         # Account recovery function handler
         async def account_recovery_handler(args: Dict[str, Any]) -> Dict[str, Any]:
             employeeId = args.get("employeeId", "")
@@ -298,11 +315,27 @@ class ITHelpdeskConfig(AgentConfig):
             handler=account_recovery_handler
         )
         
+        search_policies_function = AgentFunction(
+            name="search_it_policies",
+            description="Search IT policy documents for information about company policies, procedures, guidelines, and rules. Use this when users ask about passwords, security, access, equipment, software, or any other IT-related policies.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The user's question or keywords to search for in IT policy documents"
+                    }
+                },
+                "required": ["query"]
+            },
+            handler=search_policies_handler
+        )
+
         super().__init__(
             name="IT Helpdesk Agent",
             voice="alloy",
             instructions=get_it_helpdesk_system_message(),
-            functions=[lookup_employee_function, verify_security_function, account_recovery_function],
+            functions=[lookup_employee_function, verify_security_function, account_recovery_function, search_policies_function],
             vad_settings={
                 "threshold": 0.6,
                 "silence_duration_ms": 300,

@@ -169,7 +169,8 @@ class CommunicationHandler:
                         acknowledgment_messages = {
                             "lookup_employee": "Let me look that up for you...",
                             "verify_security_answer": "Let me verify that information...",
-                            "account_recovery": "Let me process the password reset for you..."
+                            "account_recovery": "Let me process the password reset for you...",
+                            "search_it_policies": "Let me search our IT policy database for you..."
                         }
                         
                         if function_name in acknowledgment_messages:
