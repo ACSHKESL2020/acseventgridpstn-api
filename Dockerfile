@@ -1,27 +1,37 @@
-# Use Python 3.13 slim image
-FROM python:3.13-slim
+# Use Python 3.11 slim image
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
 RUN pip install uv
 
-# Copy project files
+# Copy pyproject.toml and uv.lock first for better caching
 COPY pyproject.toml uv.lock ./
-COPY app/ ./app/
 
-# Install dependencies using uv
-RUN uv sync --frozen
+    # Install dependencies using uv with increased timeout
+    ENV UV_HTTP_TIMEOUT=120
+    RUN uv sync --frozen
+    
+    # Copy application code
+COPY app/ ./app/
 
 # Expose port
 EXPOSE 8080
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

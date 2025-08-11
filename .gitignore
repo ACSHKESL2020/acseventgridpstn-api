@@ -12,5 +12,18 @@ wheels/
 # Environment variables
 .env
 
+# Lockfiles and local artifacts
+uv.lock
+greeting.wav
+
+# Local caches and OS cruft
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Development-only folders
+tests/
+
 # VS Code Settings
 .vscode/
