@@ -344,18 +344,17 @@ class AgentConfig:
         return f"Hello {user_name}, how can I help you today?"
     
     def get_session_config(self) -> Dict[str, Any]:
-        """Get session configuration for OpenAI Realtime API"""
+        """Get session-only configuration for Voice Live. Do not include instructions or tools.
+
+        Note: In hosted Agent mode, system instructions and tools are configured in Azure AI Foundry.
+        We therefore only return session-related settings here to avoid overriding hosted configuration.
+        """
         return {
+            # Only session-related fields; caller may further refine VAD/voice per environment
             "modalities": ["text", "audio"],
-            "instructions": self.instructions,
-            "voice": self.voice,
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
-            "input_audio_transcription": {"model": "whisper-1"},
             "turn_detection": self.vad_settings,
-            "tools": self.get_functions_dict(),
-            "temperature": 0.7,
-            "max_response_output_tokens": 4096
         }
 
 

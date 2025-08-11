@@ -210,42 +210,38 @@ class VoiceLiveCommunicationHandler:
 
     async def _configure_session(self) -> None:
         """Configure the Voice Live session with agent-specific settings."""
-        # Get session config from existing agent configuration
-        base_session_config = self.agent_config.get_session_config()
-
-    # Agent mode only: do NOT override agent's instructions/tools.
-        filtered = {
-            k: v
-            for k, v in base_session_config.items()
-            if k not in ("instructions", "temperature", "max_response_output_tokens", "voice", "tools")
-        }
+        # Build session-only update (hosted agent owns instructions & tools)
+        # Defaults follow Azure Agent Mode tech specs and user's tested values.
         session_body = {
-            **filtered,
-            # Voice Live specific enhancements
             "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 800,
+                "type": "azure_semantic_vad",
+                "threshold": 0.3,
+                "prefix_padding_ms": 200,
+                "silence_duration_ms": 200,
+                "remove_filler_words": False,
+                "end_of_utterance_detection": {
+                    "model": "semantic_detection_v1",
+                    "threshold": 0.01,
+                    "timeout": 2,
+                },
             },
             "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
             "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
-            "input_audio_transcription": {"model": "whisper-1"},
+            "voice": {
+                "name": os.getenv("SESSION_VOICE_NAME", "en-US-Ava:DragonHDLatestNeural"),
+                "type": "azure-standard",
+                "temperature": float(os.getenv("SESSION_VOICE_TEMPERATURE", "0.8")),
+            },
             "modalities": ["text", "audio"],
         }
-        # Voice override: opt-in via FORCE_SESSION_VOICE to avoid server closing the socket on invalid voice
-        force_session_voice = os.getenv("FORCE_SESSION_VOICE", "false").strip().lower() in ("1", "true", "yes", "y")
-        voice_env = os.getenv("RICHARD_VOICE", "en-US-AndrewNeural")
-        if force_session_voice and voice_env:
-            session_body["voice"] = voice_env
-            self._voice_override_sent = True
-        else:
-            self._voice_override_sent = False
+
+        # We intentionally always include voice in session for hosted-agent mode.
+        self._voice_override_sent = True
 
         voice_live_session_config = {
             "type": "session.update",
             "session": session_body,
-            "event_id": ""
+            "event_id": "",
         }
         
         # Send session configuration
@@ -346,23 +342,21 @@ class VoiceLiveCommunicationHandler:
                 ):
                     # Re-send session.update without voice to keep the session healthy
                     try:
-                        base_session_config = self.agent_config.get_session_config()
-                        filtered = {
-                            k: v
-                            for k, v in base_session_config.items()
-                            if k not in ("instructions", "temperature", "max_response_output_tokens", "voice", "tools")
-                        }
                         fallback_body = {
-                            **filtered,
                             "turn_detection": {
-                                "type": "server_vad",
-                                "threshold": 0.5,
-                                "prefix_padding_ms": 300,
-                                "silence_duration_ms": 800,
+                                "type": "azure_semantic_vad",
+                                "threshold": 0.3,
+                                "prefix_padding_ms": 200,
+                                "silence_duration_ms": 200,
+                                "remove_filler_words": False,
+                                "end_of_utterance_detection": {
+                                    "model": "semantic_detection_v1",
+                                    "threshold": 0.01,
+                                    "timeout": 2,
+                                },
                             },
                             "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
                             "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
-                            "input_audio_transcription": {"model": "whisper-1"},
                             "modalities": ["text", "audio"],
                         }
                         update_msg = {
