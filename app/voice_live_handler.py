@@ -228,7 +228,7 @@ class VoiceLiveCommunicationHandler:
             "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
             "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
             "voice": {
-                "name": os.getenv("SESSION_VOICE_NAME", "en-US-Ava:DragonHDLatestNeural"),
+                "name": os.getenv("SESSION_VOICE_NAME", "en-US-Davis:DragonHDLatestNeural"),
                 "type": "azure-standard",
                 "temperature": float(os.getenv("SESSION_VOICE_TEMPERATURE", "0.8")),
             },
