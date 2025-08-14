@@ -2,6 +2,9 @@ import json
 import os
 # import logging
 import uuid
+import base64
+import struct
+import time
 from urllib.parse import urlencode, urlparse, urlunparse
 from dotenv import load_dotenv
 # from fastapi.logger import logger
@@ -74,6 +77,17 @@ AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "eikenappaudioblo
 AZURE_STORAGE_FOLDER = os.getenv("AZURE_STORAGE_FOLDER", "pstnrecordings")
 AZURE_STORAGE_SAS_TOKEN = os.getenv("AZURE_STORAGE_SAS_TOKEN")
 
+# 🔧 HARDWARE SIGNAL DETECTION CONFIGURATION (Rollback-Safe)
+# Set ENABLE_HARDWARE_DETECTION=false to disable and rollback to Azure VAD only
+ENABLE_HARDWARE_DETECTION = os.getenv("ENABLE_HARDWARE_DETECTION", "true").lower() == "true"
+HARDWARE_ENERGY_THRESHOLD = int(os.getenv("HARDWARE_ENERGY_THRESHOLD", "1000"))
+HARDWARE_BACKGROUND_NOISE = int(os.getenv("HARDWARE_BACKGROUND_NOISE", "200"))
+HARDWARE_MIN_DURATION_MS = int(os.getenv("HARDWARE_MIN_DURATION_MS", "100"))
+
+logger.info(f"🔧 Hardware signal detection: {'ENABLED' if ENABLE_HARDWARE_DETECTION else 'DISABLED'}")
+if ENABLE_HARDWARE_DETECTION:
+    logger.info(f"🔧 Hardware thresholds - Energy: {HARDWARE_ENERGY_THRESHOLD}, Background: {HARDWARE_BACKGROUND_NOISE}, Min duration: {HARDWARE_MIN_DURATION_MS}ms")
+
 # Recording settings (simplified to use direct string values)
 RECORDING_FORMAT = "wav" if os.getenv("RECORDING_FORMAT", "wav").lower() == "wav" else "mp3"
 RECORDING_CHANNEL = "unmixed" if os.getenv("RECORDING_CHANNEL_TYPE", "mixed").lower() == "unmixed" else "mixed"
@@ -91,6 +105,48 @@ context_server_call_ids = {}
 
 # Optional suppression of noisy 8522 warnings (treat as info)
 SUPPRESS_8522_WARNING = os.getenv("RECORDING_SUPPRESS_8522_WARN", "true").lower() in ("1", "true", "yes", "y")
+
+# 🎯 HARDWARE SIGNAL DETECTION FUNCTIONS (Rollback-Safe)
+def calculate_rms_level(audio_bytes: bytes) -> float:
+    """Calculate RMS (Root Mean Square) audio level from PCM data"""
+    if len(audio_bytes) < 2:
+        return 0.0
+    
+    try:
+        # Convert bytes to 16-bit integers (PCM format)
+        num_samples = len(audio_bytes) // 2
+        samples = struct.unpack(f'<{num_samples}h', audio_bytes)
+        
+        # Calculate RMS
+        sum_squares = sum(sample * sample for sample in samples)
+        rms = (sum_squares / num_samples) ** 0.5
+        return rms
+    except Exception as e:
+        logger.debug(f"Error calculating RMS: {e}")
+        return 0.0
+
+def detect_hardware_speech_signal(audio_data: str) -> bool:
+    """Hardware-level speech detection based on energy analysis"""
+    if not ENABLE_HARDWARE_DETECTION:
+        return False
+    
+    try:
+        # Decode base64 audio data
+        audio_bytes = base64.b64decode(audio_data)
+        
+        # Calculate energy level
+        energy = calculate_rms_level(audio_bytes)
+        
+        # Check if energy exceeds background noise + threshold
+        is_speech = energy > (HARDWARE_BACKGROUND_NOISE + HARDWARE_ENERGY_THRESHOLD)
+        
+        if is_speech:
+            logger.debug(f"🔥 Hardware signal detected | Energy: {energy:.0f} | Threshold: {HARDWARE_BACKGROUND_NOISE + HARDWARE_ENERGY_THRESHOLD}")
+        
+        return is_speech
+    except Exception as e:
+        logger.debug(f"Hardware detection error: {e}")
+        return False
 
 def get_acs_client():
     global acs_ca_client
@@ -540,6 +596,15 @@ async def ws(websocket: WebSocket):
     await websocket.accept()
     # Always use Azure Voice Live API
     logger.info("Using Azure Voice Live API with enhanced audio processing (agent mode only)")
+    
+    # 🎯 Hardware signal detection state (Rollback-Safe)
+    hardware_signal_state = {
+        "is_user_speaking": False,
+        "signal_start_time": None,
+        "last_energy_level": 0,
+        "detection_count": 0
+    }
+    
     service = VoiceLiveCommunicationHandler(websocket)
     # Establish upstream connection; if it fails, close gracefully to avoid churn
     try:
@@ -580,6 +645,36 @@ async def ws(websocket: WebSocket):
                     or data.get("AudioData", {}).get("Data")
                 )
                 if audio_data:
+                    # 🎯 HARDWARE SIGNAL DETECTION (Rollback-Safe)
+                    if ENABLE_HARDWARE_DETECTION:
+                        current_time = time.time()
+                        is_hardware_signal = detect_hardware_speech_signal(audio_data)
+                        
+                        # Track signal state changes
+                        if is_hardware_signal and not hardware_signal_state["is_user_speaking"]:
+                            # Signal started
+                            hardware_signal_state["is_user_speaking"] = True
+                            hardware_signal_state["signal_start_time"] = current_time
+                            hardware_signal_state["detection_count"] += 1
+                            logger.info(f"🔥 HARDWARE SIGNAL STARTED | Detection #{hardware_signal_state['detection_count']} | Energy: {hardware_signal_state['last_energy_level']:.0f}")
+                            
+                            # Trigger immediate interruption via voice handler
+                            try:
+                                await service._handle_hardware_interruption()
+                            except AttributeError:
+                                logger.debug("Hardware interruption method not available - using fallback")
+                        
+                        elif not is_hardware_signal and hardware_signal_state["is_user_speaking"]:
+                            # Signal stopped
+                            signal_duration = (current_time - hardware_signal_state["signal_start_time"]) * 1000
+                            if signal_duration >= HARDWARE_MIN_DURATION_MS:
+                                logger.info(f"🔥 HARDWARE SIGNAL STOPPED | Duration: {signal_duration:.0f}ms | Valid signal")
+                            else:
+                                logger.debug(f"🔇 Hardware signal too short: {signal_duration:.0f}ms (ignored)")
+                            hardware_signal_state["is_user_speaking"] = False
+                            hardware_signal_state["signal_start_time"] = None
+                    
+                    # Always send to Azure Voice Live (Azure VAD still runs as backup)
                     await service.send_audio_async(audio_data)
             elif kind == "StopAudio":
                 await service.stop_audio_async()
