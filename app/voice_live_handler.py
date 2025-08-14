@@ -20,7 +20,7 @@ from azure.identity.aio import DefaultAzureCredential
 from loguru import logger as sync_logger
 import aiohttp
 
-from app.agent_config import get_agent_config, AgentConfig, ACKNOWLEDGMENT_MESSAGES
+# from app.agent_config import get_agent_config, AgentConfig, ACKNOWLEDGMENT_MESSAGES
 
 # Setup logging (use loguru for simplicity and reliability in async contexts)
 logging.basicConfig(level=logging.INFO)
@@ -39,18 +39,14 @@ logger = _LoggerWrapper()
 
 load_dotenv()
 
+# Import after load_dotenv() to ensure environment variables are available
+from app.get_access_token import get_agent_access_token, AGENT_ID, AGENT_PROJECT_NAME, AZURE_AGENT_ENDPOINT
+
 # Voice Live API Configuration (Direct API mode - not used in Agent mode)
 # AZURE_VOICE_LIVE_ENDPOINT = os.getenv("AZURE_VOICE_LIVE_ENDPOINT")  # Not used in agent mode
 # AZURE_VOICE_LIVE_API_KEY = os.getenv("AZURE_VOICE_LIVE_API_KEY")     # Not used in agent mode
 # VOICE_LIVE_MODEL = os.getenv("VOICE_LIVE_MODEL", "gpt-4o")           # Not used in agent mode
 AZURE_VOICE_LIVE_API_VERSION = os.getenv("AZURE_VOICE_LIVE_API_VERSION", "2025-05-01-preview")  # Used for agent mode API versioning
-
-# Agent mode (Azure AI Foundry Agent Service) configuration
-AGENT_ID = os.getenv("AGENT_ID")
-AGENT_PROJECT_NAME = os.getenv("AGENT_PROJECT_NAME")
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")  # Optional: will be auto-generated if not provided
-AZURE_AGENT_ENDPOINT = os.getenv("AZURE_AGENT_ENDPOINT")
-AGENT_TOKEN_URL = os.getenv("AGENT_TOKEN_URL")  # Optional override for token generation endpoint
 
 class VoiceLiveCommunicationHandler:
     """
@@ -61,7 +57,7 @@ class VoiceLiveCommunicationHandler:
     def __init__(self, websocket: WebSocket, agent_type: str = "it_helpdesk") -> None:
         self.voice_live_ws = None
         self.active_websocket = websocket
-        self.agent_config: AgentConfig = get_agent_config(agent_type)
+        # self.agent_config: AgentConfig = get_agent_config(agent_type)
         self.conversation_call_id = str(uuid.uuid4())
         self.is_connected = False
         # Agent mode is the only supported mode
@@ -89,7 +85,7 @@ class VoiceLiveCommunicationHandler:
             base_ws = f"{AZURE_AGENT_ENDPOINT.replace('https://', 'wss://').rstrip('/')}/voice-live/realtime"
             # Agent mode URL (Agent Service)
             # wss://.../voice-live/realtime?api-version=...&agent-project-name=...&agent-id=...&agent-access-token=...
-            agent_access_token = await self._get_agent_access_token()
+            agent_access_token = await get_agent_access_token()
             ws_url = (
                 f"{base_ws}?api-version={AZURE_VOICE_LIVE_API_VERSION}"
                 f"&agent-project-name={AGENT_PROJECT_NAME}"
@@ -140,87 +136,6 @@ class VoiceLiveCommunicationHandler:
         except Exception as e:
             logger.error(f"Failed to connect to Voice Live API: {e}")
             raise e
-
-    async def _get_agent_access_token(self) -> str:
-        """Get or generate the Agent Access Token for Voice Live agent mode.
-        Order of precedence:
-        1) If ACCESS_TOKEN env is provided, use it (useful for local dev).
-        2) If AGENT_TOKEN_URL env is provided, call it to fetch a token.
-        3) Attempt default Azure Agents API pattern using AZURE_AGENT_ENDPOINT.
-        """
-        if ACCESS_TOKEN:
-            return ACCESS_TOKEN
-
-        # Acquire AAD token to authorize token-generation request
-        credential = DefaultAzureCredential()
-        try:
-            aad_token = await credential.get_token("https://ai.azure.com/.default")
-        finally:
-            await credential.close()
-        auth_header = {"Authorization": f"Bearer {aad_token.token}", "Content-Type": "application/json"}
-
-        # Determine endpoint(s) to call
-        if not (AZURE_AGENT_ENDPOINT and AGENT_PROJECT_NAME and AGENT_ID):
-            raise RuntimeError("Cannot generate agent access token: missing AZURE_AGENT_ENDPOINT or identifiers.")
-
-        base = AZURE_AGENT_ENDPOINT.rstrip("/")
-
-        # Candidate API versions and paths (try most likely first)
-        versions = [AZURE_VOICE_LIVE_API_VERSION, "2024-10-01-preview"]
-        path_templates = [
-            "/openai/agents/v2/projects/{project}/agents/{agent}:generateAccessToken",
-            "/openai/agents/v2/projects/{project}/agents/{agent}:generateToken",
-            "/openai/agents/v1/projects/{project}/agents/{agent}:generateAccessToken",
-            "/openai/agents/v1/projects/{project}/agents/{agent}:generateToken",
-        ]
-
-        # If a full override URL is provided, try it first (with and without api-version)
-        candidate_urls: list[str] = []
-        if AGENT_TOKEN_URL:
-            candidate_urls.append(AGENT_TOKEN_URL)
-            for v in versions:
-                candidate_urls.append(f"{AGENT_TOKEN_URL}{'&' if '?' in AGENT_TOKEN_URL else '?'}api-version={v}")
-
-        # Build default candidates
-        for tmpl in path_templates:
-            for v in versions:
-                candidate_urls.append(
-                    f"{base}{tmpl.format(project=AGENT_PROJECT_NAME, agent=AGENT_ID)}?api-version={v}"
-                )
-
-        last_error_text = None
-        try:
-            async with aiohttp.ClientSession() as session:
-                for url in candidate_urls:
-                    try:
-                        async with session.post(url, headers=auth_header, json={}) as resp:
-                            if 200 <= resp.status < 300:
-                                data = await resp.json()
-                                token = (
-                                    data.get("access_token") or
-                                    data.get("agent_access_token") or
-                                    data.get("agentAccessToken") or
-                                    data.get("token")
-                                )
-                                if token:
-                                    return token
-                                last_error_text = f"Missing token field in response from {url}: {data}"
-                            else:
-                                text = await resp.text()
-                                last_error_text = f"{resp.status} {text} (url={url})"
-                                # Only continue to next candidate on 404; other codes are likely auth/permission
-                                if resp.status != 404:
-                                    raise RuntimeError(f"Token generation failed: {last_error_text}")
-                    except Exception as inner:
-                        # Continue trying other candidates; remember last error
-                        last_error_text = str(inner)
-                        continue
-        except Exception:
-            # Outer-level exceptions are unexpected; re-raise below
-            pass
-
-        logger.error(f"Error generating agent access token: {last_error_text or 'Unknown error'}")
-        raise RuntimeError(f"Token generation failed: {last_error_text or 'Unknown error'}")
 
     async def _configure_session(self) -> None:
         """Configure the Voice Live session with agent-specific settings."""
@@ -561,14 +476,17 @@ class VoiceLiveCommunicationHandler:
                 ):
                     # Re-send session.update without voice to keep the session healthy
                     try:
-                        base_session_config = self.agent_config.get_session_config()
-                        filtered = {
-                            k: v
-                            for k, v in base_session_config.items()
-                            if k not in ("instructions", "temperature", "max_response_output_tokens", "voice", "tools")
-                        }
+                        # base_session_config = self.agent_config.get_session_config()
+                        # filtered = {
+                        #     k: v
+                        #     for k, v in base_session_config.items()
+                        #     if k not in ("instructions", "temperature", "max_response_output_tokens", "voice", "tools")
+                        # }
                         fallback_body = {
-                            **filtered,
+                            # **filtered,  # Commented out since we removed agent_config
+                            "modalities": ["text", "audio"],  # Hardcoded fallback
+                            "input_audio_format": "pcm16",
+                            "output_audio_format": "pcm16", 
                             "turn_detection": {
                                 "type": "server_vad",
                                 "threshold": 0.5,
@@ -694,7 +612,8 @@ class VoiceLiveCommunicationHandler:
 
         # Use agent config to handle function calls - same as existing implementation
         try:
-            handler = self.agent_config.get_function_handler(function_name)
+            # handler = self.agent_config.get_function_handler(function_name)
+            handler = None  # Since we're testing without agent_config
             if handler:
                 result = await handler(args)
                 # Handle both string and dict results
@@ -704,7 +623,7 @@ class VoiceLiveCommunicationHandler:
                     # Convert the output to JSON string for API
                     output = json.dumps(result.get("output", result))
             else:
-                output = json.dumps({"success": False, "error": f"Function {function_name} not found"})
+                output = json.dumps({"success": False, "error": f"Function {function_name} handled by Azure Agent - no local handler needed"})
             
             # Send function result back to Voice Live API
             await self.voice_live_ws.send(json.dumps({
