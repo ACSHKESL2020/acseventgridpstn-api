@@ -71,6 +71,8 @@ class VoiceLiveCommunicationHandler:
         self._current_response_audio_queue: list = []
         self._is_streaming_audio: bool = False
         self._response_items: list = []  # Track assistant audio items for truncation
+        self._interruption_timestamp: Optional[float] = None  # Track when interruption occurred
+        self._interruption_cooldown: float = 2.0  # Prevent new responses for 2 seconds after interruption
         
         # Call startup protection - track when call begins
         self._call_start_time: Optional[float] = None
@@ -143,27 +145,15 @@ class VoiceLiveCommunicationHandler:
         # Defaults follow Azure Agent Mode tech specs and user's tested values.
         session_body = {
             "turn_detection": {
-                "type": "azure_semantic_vad",
-                "threshold": 0.3,
-                "prefix_padding_ms": 200,
-                "silence_duration_ms": 200,
-                "remove_filler_words": False,
-                "end_of_utterance_detection": {
-                    "model": "semantic_detection_v1",
-                    "threshold": 0.01,
-                    "timeout": 2,
-                },
-            },
-            "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
-            "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
-            "turn_detection": {
                 "type": "server_vad",
-                "threshold": 0.4,  # Lower threshold for faster speech detection (more sensitive)
-                "prefix_padding_ms": "200",  # Reduce padding for faster response
-                "silence_duration_ms": "600",  # Shorter silence detection for quicker responses
+                "threshold": 0.9,  # MUCH MORE SENSITIVE - detect even quiet speech
+                "prefix_padding_ms": 1000,  # Faster response
+                "silence_duration_ms": 1000,  # Shorter silence detection
                 "create_response": True,  # Automatically create responses when speech stops
                 "interrupt_response": True  # Automatically interrupt ongoing responses when speech starts
             },
+            "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+            "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
             "voice": {
                 "name": os.getenv("SESSION_VOICE_NAME", "en-US-Davis:DragonHDLatestNeural"),
                 "type": "azure-standard",
@@ -295,6 +285,26 @@ class VoiceLiveCommunicationHandler:
                     logger.info(f"📞 User (from phone): {transcript} | Item ID: {item_id} | Event ID: {event_id}")
                     
             case "response.created":
+                # Check for interruption cooldown period
+                current_time = time.time()
+                if (self._interruption_timestamp and 
+                    current_time - self._interruption_timestamp < self._interruption_cooldown):
+                    
+                    time_remaining = self._interruption_cooldown - (current_time - self._interruption_timestamp)
+                    logger.warning(f"🚫 BLOCKING NEW RESPONSE during cooldown | Response ID: {response_id} | Cooldown remaining: {time_remaining:.1f}s")
+                    
+                    # Immediately cancel this unwanted response
+                    try:
+                        cancel_msg = {
+                            "type": "response.cancel",
+                            "event_id": f"cooldown_cancel_{uuid.uuid4()}"
+                        }
+                        await self.voice_live_ws.send(json.dumps(cancel_msg))
+                        logger.info(f"✅ Auto-cancelled response {response_id} due to interruption cooldown")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to auto-cancel response: {e}")
+                    return
+                
                 # Track the current response for interruption handling
                 self._current_response_id = response_id
                 self._is_streaming_audio = True
@@ -308,7 +318,13 @@ class VoiceLiveCommunicationHandler:
                 self._is_streaming_audio = False
                 self._audio_stream_start_time = None  # Clear timing
                 self._response_items.clear()  # Clear tracked items
-                logger.info(f"✅ AI response completed | Response ID: {response_id} | Event ID: {event_id}")
+                
+                # Clear interruption cooldown if this response completed successfully
+                if self._interruption_timestamp:
+                    self._interruption_timestamp = None
+                    logger.info(f"✅ AI response completed | Response ID: {response_id} | Interruption cooldown cleared | Event ID: {event_id}")
+                else:
+                    logger.info(f"✅ AI response completed | Response ID: {response_id} | Event ID: {event_id}")
                 
             case "response.output_item.added":
                 # Track new assistant items for potential truncation
@@ -397,6 +413,27 @@ class VoiceLiveCommunicationHandler:
                 logger.info(f"📝 Conversation item created: {item_type}")
                 
             case "response.created":
+                # Check for interruption cooldown period
+                current_time = time.time()
+                response_id = message.get("response", {}).get("id", "unknown")
+                if (self._interruption_timestamp and 
+                    current_time - self._interruption_timestamp < self._interruption_cooldown):
+                    
+                    time_remaining = self._interruption_cooldown - (current_time - self._interruption_timestamp)
+                    logger.warning(f"🚫 BLOCKING NEW RESPONSE during cooldown | Response ID: {response_id} | Cooldown remaining: {time_remaining:.1f}s")
+                    
+                    # Immediately cancel this unwanted response
+                    try:
+                        cancel_msg = {
+                            "type": "response.cancel",
+                            "event_id": f"cooldown_cancel_{uuid.uuid4()}"
+                        }
+                        await self.voice_live_ws.send(json.dumps(cancel_msg))
+                        logger.info(f"✅ Auto-cancelled response {response_id} due to interruption cooldown")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to auto-cancel response: {e}")
+                    return
+                
                 response = message.get("response", {})
                 logger.info(f"🤖 AI response created: {response.get('id', 'unknown')}")
                 
@@ -416,7 +453,14 @@ class VoiceLiveCommunicationHandler:
                 logger.error(f"❌ Phone call transcription failed: {message.get('error')}")
                 
             case "response.done":
-                logger.info(f"✅ AI response completed: {message.get('response', {}).get('id')}")
+                response_id = message.get('response', {}).get('id', 'unknown')
+                
+                # Clear interruption cooldown if this response completed successfully
+                if self._interruption_timestamp:
+                    self._interruption_timestamp = None
+                    logger.info(f"✅ AI response completed: {response_id} | Interruption cooldown cleared")
+                else:
+                    logger.info(f"✅ AI response completed: {response_id}")
                 
             case "response.audio_transcript.delta":
                 # Handle partial transcription if needed
@@ -732,12 +776,13 @@ class VoiceLiveCommunicationHandler:
         # LAYER 6: Reset response tracking and prepare for new interaction
         old_response_id = self._current_response_id
         self._current_response_id = None
+        self._interruption_timestamp = time.time()  # Set interruption cooldown timestamp
         if hasattr(self, '_response_items'):
             if not hasattr(self, '_response_items'):
                 self._response_items = []
             self._response_items.clear()
         
-        logger.info(f"🔄 Interruption tracking reset | Previous Response: {old_response_id} | Ready for new interaction")
+        logger.info(f"🔄 Interruption tracking reset | Previous Response: {old_response_id} | Cooldown activated for {self._interruption_cooldown}s")
         
         # LAYER 7: Optional aggressive fallback for WebRTC environments
         # Note: This only works in WebRTC mode, but included for completeness
