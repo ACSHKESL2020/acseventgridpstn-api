@@ -151,8 +151,9 @@ wss.on('connection', async (ws, request) => {
           // Forward caller audio FROM ACS -> Voice Live upstream
           await service.send_audio_async(audio);
         }
-    } else if (kindLower === 'stopaudio') {
-        // handle stop audio
+  } else if (kindLower === 'stopaudio') {
+    // Commit input to nudge Voice Live to finalize turn
+    await service.commitInputAudio();
       }
     } catch (e) {
     // silently ignore non-JSON frames to avoid console flooding

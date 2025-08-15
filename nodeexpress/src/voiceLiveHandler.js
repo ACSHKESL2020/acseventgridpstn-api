@@ -22,7 +22,8 @@ export class VoiceLiveCommunicationHandler {
     this._isStreamingAudio = false;
     this._responseItems = [];
     this._interruptionTimestamp = null;
-    this._interruptionCooldown = 2.0;
+  this._interruptionCooldown = parseFloat(process.env.INTERRUPTION_COOLDOWN_SEC || '1.0');
+  this._ttsStopTailMs = parseInt(process.env.TTS_STOP_TAIL_MS || '0', 10);
   }
 
   async startConversationAsync() {
@@ -109,6 +110,14 @@ export class VoiceLiveCommunicationHandler {
         this._responseItems = [];
         console.info('AI response created', responseId);
         break;
+      case 'input_audio_buffer.speech_started': {
+        // User started speaking – interrupt any current TTS immediately
+        const now = Date.now();
+        if (!this._interruptionTimestamp || (now - this._interruptionTimestamp) / 1000 > this._interruptionCooldown) {
+          await this._handleUserInterruption('speech_started');
+        }
+        break;
+      }
       case 'conversation.item.input_audio_transcription.completed': {
         const t = (message.transcript || '').trim();
         if (t) console.info(`User: ${t}`);
@@ -131,7 +140,10 @@ export class VoiceLiveCommunicationHandler {
         console.info('AI response completed', responseId);
         break;
       case 'response.audio.delta':
-        if (message.delta) await this.receiveAudio(message.delta);
+  // Gate by current active response; drop stale audio frames
+  if (this._isStreamingAudio === false) break;
+  if (message.response_id && this._currentResponseId && message.response_id !== this._currentResponseId) break;
+  if (message.delta) await this.receiveAudio(message.delta);
         break;
       default:
         // ignore
@@ -163,6 +175,9 @@ export class VoiceLiveCommunicationHandler {
   async _handleUserInterruption(newItemId) {
     console.info('Interruption initiated', newItemId);
     this._isStreamingAudio = false;
+    // Stop audio downstream to ACS immediately
+    await this._sendStopAudioToAcs();
+
     if (this.voiceLiveWs && this._currentResponseId) {
       const cancelMsg = { type: 'response.cancel', event_id: `cancel_${cryptoRandomUuid()}` };
       this.voiceLiveWs.send(JSON.stringify(cancelMsg));
@@ -171,6 +186,12 @@ export class VoiceLiveCommunicationHandler {
       const clearMsg = { type: 'input_audio_buffer.clear', event_id: `clear_input_${cryptoRandomUuid()}` };
       this.voiceLiveWs.send(JSON.stringify(clearMsg));
     }
+    // Optionally leave a tiny tail before committing input audio to improve VAD cut
+    const tail = Math.max(0, this._ttsStopTailMs | 0);
+    if (tail > 0) {
+      await new Promise(r => setTimeout(r, tail));
+    }
+    await this.commitInputAudio();
     this._currentResponseId = null;
     this._interruptionTimestamp = Date.now();
   }
@@ -187,6 +208,17 @@ export class VoiceLiveCommunicationHandler {
       this.voiceLiveWs.send(JSON.stringify(msg));
     } catch (e) {
       // keep quiet to avoid flooding
+    }
+  }
+
+  async _sendStopAudioToAcs() {
+    try {
+      if (this.activeWebsocket && this.activeWebsocket.readyState === WebSocket.OPEN) {
+        const payload = { Kind: 'StopAudio', StopAudio: {} };
+        this.activeWebsocket.send(JSON.stringify(payload));
+      }
+    } catch (e) {
+      // best-effort
     }
   }
 }
