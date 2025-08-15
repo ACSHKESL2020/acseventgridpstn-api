@@ -1,0 +1,29 @@
+# Node modules
+node_modules/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.pid.lock
+
+# Build outputs
+coverage/
+dist/
+build/
+
+# OS / Editor junk
+.DS_Store
+.vscode/

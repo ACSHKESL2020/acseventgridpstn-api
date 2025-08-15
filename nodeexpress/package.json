@@ -1,0 +1,22 @@
+{
+  "name": "nodeexpress-acs-voice-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon --watch src --exec node src/app.js"
+  },
+  "dependencies": {
+    "@azure/communication-call-automation": "^1.4.0",
+    "@azure/eventgrid": "^5.12.0",
+    "@azure/identity": "^4.11.1",
+    "@azure/storage-blob": "^12.28.0",
+    "axios": "^1.4.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
