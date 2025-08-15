@@ -109,6 +109,21 @@ export class VoiceLiveCommunicationHandler {
         this._responseItems = [];
         console.info('AI response created', responseId);
         break;
+      case 'conversation.item.input_audio_transcription.completed': {
+        const t = (message.transcript || '').trim();
+        if (t) console.info(`User: ${t}`);
+        break;
+      }
+      case 'conversation.item.input_audio_transcription.failed': {
+        const err = message.error || message.reason || 'transcription failed';
+        console.error(`User transcription error: ${typeof err === 'string' ? err : JSON.stringify(err)}`);
+        break;
+      }
+      case 'response.audio_transcript.done': {
+        const t = (message.transcript || '').trim();
+        if (t) console.info(`AI: ${t}`);
+        break;
+      }
       case 'response.done':
         this._currentResponseId = null;
         this._isStreamingAudio = false;
