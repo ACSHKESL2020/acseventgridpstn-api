@@ -1,37 +1,20 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+# Node 20 base image for Azure Container Apps
+FROM node:20-alpine
 
-# Set working directory
-WORKDIR /app
+# Create app directory
+WORKDIR /usr/src/app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install dependencies
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install --no-audit --no-fund
 
-# Install uv
-RUN pip install uv
+# Bundle app source
+COPY . .
 
-# Copy pyproject.toml and uv.lock first for better caching
-COPY pyproject.toml uv.lock ./
-
-    # Install dependencies using uv with increased timeout
-    ENV UV_HTTP_TIMEOUT=120
-    RUN uv sync --frozen
-    
-    # Copy application code
-COPY app/ ./app/
-
-# Expose port
+# Set environment
+ENV NODE_ENV=production
+# Azure Container Apps will set PORT
 EXPOSE 8080
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PORT=8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-# Run the application
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run the web service on container startup.
+CMD ["npm", "start"]
