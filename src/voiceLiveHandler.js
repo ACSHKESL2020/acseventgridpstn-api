@@ -311,9 +311,11 @@ export class VoiceLiveCommunicationHandler {
                 this.audioState = { sessionId, outPath, startedAt: new Date() };
                 // console.log('🎬 [RECORDING] Recording started:', { sessionId, outPath });
                 try {
-                  await Sessions.updateOne({ sessionId: this.conversationCallId }, { $setOnInsert: { sessionId: this.conversationCallId, startedAt: new Date(), status: 'active', channel: 'PSTN', callerId: this.callerId } }, { upsert: true });
+                  console.log(`🎬 [DB] Attempting to create session: ${this.conversationCallId} for caller: ${this.callerId}`);
+                  const result = await Sessions.updateOne({ sessionId: this.conversationCallId }, { $setOnInsert: { sessionId: this.conversationCallId, startedAt: new Date(), status: 'active', channel: 'PSTN', callerId: this.callerId } }, { upsert: true });
+                  console.log(`🎬 [DB] Session creation result:`, result);
                 } catch (e) {
-                  // ignore db errors
+                  console.error('🎬 [DB] Session creation failed:', e.message);
                 }
               } catch (e) {
                 console.error('Failed to start recording for session', this.conversationCallId, e);

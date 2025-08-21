@@ -11,14 +11,16 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // Connect to MongoDB if MONGO_URL present
 const mongoUrl = process.env.MONGO_URL || process.env.MONGO_URI || null;
+console.log(`🎬 [DB] MongoDB URL check: ${mongoUrl ? 'Found' : 'Not found'}`);
 if (mongoUrl) {
+  console.log(`🎬 [DB] Connecting to MongoDB...`);
   mongoose.connect(mongoUrl, { autoIndex: false }).then(() => {
-    console.info('MongoDB connected');
+    console.info('🎬 [DB] MongoDB connected successfully');
   }).catch((err) => {
-    console.error('MongoDB connection error:', err);
+    console.error('🎬 [DB] MongoDB connection error:', err.message);
   });
 } else {
-  console.warn('MONGO_URL not set - Sessions writes will fail until configured');
+  console.warn('🎬 [DB] MONGO_URL not set - Sessions writes will fail until configured');
 }
 
 // const __filename = fileURLToPath(import.meta.url);
