@@ -24,9 +24,20 @@ export function startFfmpegEncode({ outPath, sampleRate = 24000, bitrate = '16k'
 
 	const ff = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
 
-	// Silence ffmpeg stderr in normal operation to avoid noisy logs.
-	ff.stderr.on('data', () => {});
-	ff.on('error', () => {});
+	// Add debugging for FFmpeg process
+	console.log(`🎬 [FFMPEG] Starting FFmpeg with args:`, args);
+	
+	ff.stderr.on('data', (data) => {
+		console.log(`🎬 [FFMPEG] stderr:`, data.toString());
+	});
+	
+	ff.on('error', (err) => {
+		console.error(`🎬 [FFMPEG] Process error:`, err.message);
+	});
+	
+	ff.on('exit', (code, signal) => {
+		console.log(`🎬 [FFMPEG] Process exited with code ${code}, signal ${signal}`);
+	});
 
 	return ff; // expose stdin to write PCM
 }
