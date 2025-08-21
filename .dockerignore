@@ -1,54 +1,12 @@
-# Git
+node_modules
+npm-debug.log*
+.yarn*
+.pnpm-store
+.env
+*.env
+server.log
+server.pid
 .git
 .gitignore
-.github
-
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-.venv
-env
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.vscode
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# IDE
-.vscode
-.idea
-
-# Documentation
-README.md
-*.md
-
-# Environment files (these should be set via Azure Container Apps environment variables)
-.env.local
-.env.development
-.env.test
-.env.production
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+Dockerfile*
+**/.DS_Store
