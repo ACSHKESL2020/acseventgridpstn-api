@@ -43,7 +43,7 @@ const pendingServerCallIdsByContext = new Map(); // contextId -> serverCallId fr
 const pendingCallerIdsByContext = new Map(); // contextId -> callerId for session creation
 let currentCallerId = 'unknown'; // Most recent caller ID for WebSocket connections
 app.post('/api/incomingCall', (req, res) => {
-  console.info('incoming event data');
+  //console.info('incoming event data');
   const events = Array.isArray(req.body) ? req.body : [req.body];
 
   // Handle EventGrid subscription validation synchronously and return immediately.
@@ -54,7 +54,7 @@ app.post('/api/incomingCall', (req, res) => {
       if (et === 'Microsoft.EventGrid.SubscriptionValidationEvent') {
         const validationCode = ev?.data?.validationCode;
         if (validationCode) {
-          console.info('Responding to EventGrid subscription validation');
+          //console.info('Responding to EventGrid subscription validation');
           return res.status(200).json({ validationResponse: validationCode });
         }
       }
@@ -109,7 +109,7 @@ app.post('/api/incomingCall', (req, res) => {
           const from = data.from || {};
           console.log(`📞 [DEBUG] FROM object:`, JSON.stringify(from, null, 2));
           const callerId = from.phoneNumber ? from.phoneNumber.value : (from.rawId || 'unknown');
-          console.log(`📞 [DEBUG] Extracted callerId: ${callerId}`);
+          // console.log(`📞 [DEBUG] Extracted callerId: ${callerId}`);
 
           // Prefer explicit env; otherwise derive from request headers (works behind ACA ingress if trust proxy enabled)
           let callbackUriHost = process.env.CALLBACK_URI_HOST;
@@ -177,17 +177,17 @@ const CALLBACK_URI_HOST = process.env.CALLBACK_URI_HOST || 'http://localhost:808
 app.post('/api/callbacks/:contextId', async (req, res) => {
   const contextId = req.params.contextId;
   const callerId = req.query.callerId || 'unknown';
-  console.log(`📞 [DEBUG] Received callback for contextId: ${contextId}, callerId: ${callerId}`);
-  console.log(`📞 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
+  // console.log(`📞 [DEBUG] Received callback for contextId: ${contextId}, callerId: ${callerId}`);
+  // console.log(`📞 [DEBUG] Request body:`, JSON.stringify(req.body, null, 2));
   
   // Store callerId for this context for later use in session creation
   pendingCallerIdsByContext.set(contextId, callerId);
   currentCallerId = callerId; // Store most recent for WebSocket connections
-  console.log(`📞 [DEBUG] Updated currentCallerId to: ${currentCallerId}`);
+  //console.log(`📞 [DEBUG] Updated currentCallerId to: ${currentCallerId}`);
   
   let events = req.body;
   if (!Array.isArray(events)) events = [events];
-  console.log(`📞 [DEBUG] Processing ${events.length} events`);
+  // console.log(`📞 [DEBUG] Processing ${events.length} events`);
   for (const event of events) {
     try {
       const eventType = event?.type;
@@ -246,21 +246,21 @@ app.post('/api/callbacks/:contextId', async (req, res) => {
         }
       } else if (eventType === 'Microsoft.Communication.MediaStreamingStarted') {
         const msu = data.mediaStreamingUpdate || {};
-        console.info(`Media streaming content type:--> ${msu.contentType}`);
-        console.info(`Media streaming status:--> ${msu.mediaStreamingStatus}`);
-        console.info(`Media streaming status details:--> ${msu.mediaStreamingStatusDetails}`);
+        // console.info(`Media streaming content type:--> ${msu.contentType}`);
+        // console.info(`Media streaming status:--> ${msu.mediaStreamingStatus}`);
+        // console.info(`Media streaming status details:--> ${msu.mediaStreamingStatusDetails}`);
       } else if (eventType === 'Microsoft.Communication.MediaStreamingStopped') {
         const msu = data.mediaStreamingUpdate || {};
-        console.info(`Media streaming content type:--> ${msu.contentType}`);
-        console.info(`Media streaming status:--> ${msu.mediaStreamingStatus}`);
-        console.info(`Media streaming status details:--> ${msu.mediaStreamingStatusDetails}`);
+        // console.info(`Media streaming content type:--> ${msu.contentType}`);
+        // console.info(`Media streaming status:--> ${msu.mediaStreamingStatus}`);
+        // console.info(`Media streaming status details:--> ${msu.mediaStreamingStatusDetails}`);
       } else if (eventType === 'Microsoft.Communication.MediaStreamingFailed') {
         const ri = data.resultInformation || {};
-        console.info(`Code:->${ri.code}, Subcode:-> ${ri.subCode}`);
-        console.info(`Message:->${ri.message}`);
+        // console.info(`Code:->${ri.code}, Subcode:-> ${ri.subCode}`);
+        // console.info(`Message:->${ri.message}`);
       } else if (eventType === 'Microsoft.Communication.CallDisconnected') {
-        console.info(`🎬 [DEBUG] Call disconnected for ${contextId}`);
-        console.info(`🎬 [DEBUG] currentVoiceLiveHandler exists: ${currentVoiceLiveHandler ? 'YES' : 'NO'}`);
+        // console.info(`🎬 [DEBUG] Call disconnected for ${contextId}`);
+        // console.info(`🎬 [DEBUG] currentVoiceLiveHandler exists: ${currentVoiceLiveHandler ? 'YES' : 'NO'}`);
         
         // Cancel the timeout since we got the ACS event
         if (handlerFinalizationTimeout) {
@@ -271,16 +271,16 @@ app.post('/api/callbacks/:contextId', async (req, res) => {
         
         // 🎬 [RECORDING] Finalize recording on call disconnect
         if (currentVoiceLiveHandler) {
-          console.info(`🎬 [RECORDING] Finalizing recording for disconnected call ${contextId}`);
+          //console.info(`🎬 [RECORDING] Finalizing recording for disconnected call ${contextId}`);
           try {
             await currentVoiceLiveHandler.finalizeRecording();
-            console.info(`🎬 [RECORDING] Recording finalized successfully for ${contextId}`);
+            // console.info(`🎬 [RECORDING] Recording finalized successfully for ${contextId}`);
             currentVoiceLiveHandler = null; // Clear the handler after finalizing
           } catch (e) {
             console.error(`🎬 [RECORDING] Error finalizing recording for ${contextId}:`, e);
           }
         } else {
-          console.info(`🎬 [DEBUG] Recording disabled — no active handler for disconnected call ${contextId}`);
+          // console.info(`🎬 [DEBUG] Recording disabled — no active handler for disconnected call ${contextId}`);
         }
         
         try {
@@ -292,10 +292,10 @@ app.post('/api/callbacks/:contextId', async (req, res) => {
           const chunks = data?.recordingStorageInfo?.recordingChunks || [];
           if (chunks.length) {
             const c = chunks[0];
-            console.info(`Recording ready for call ${contextId}:`);
-            console.info(`- Document ID: ${c.documentId}`);
-            console.info(`- Content URL: ${c.contentLocation}`);
-            console.info(`- Duration: ${data.recordingDurationMs}ms`);
+          //   console.info(`Recording ready for call ${contextId}:`);
+          //   console.info(`- Document ID: ${c.documentId}`);
+          //   console.info(`- Content URL: ${c.contentLocation}`);
+          //   console.info(`- Duration: ${data.recordingDurationMs}ms`);
           }
         } catch (e) {
           console.error('Error processing recording status:', e);
@@ -354,17 +354,17 @@ import { VoiceLiveCommunicationHandler } from './voiceLiveHandler.js';
 const wss = new WebSocketServer({ noServer: true });
 
 wss.on('connection', async (ws, request) => {
-  console.info('WS client connected');
+  // console.info('WS client connected');
   
   let callerId = currentCallerId || 'unknown';
-  console.log(`📞 [DEBUG] WebSocket connected with callerId: ${callerId}`);
+  // console.log(`📞 [DEBUG] WebSocket connected with callerId: ${callerId}`);
   
   const service = new VoiceLiveCommunicationHandler(ws, callerId);
   currentVoiceLiveHandler = service; // Store the active handler globally
   try {
     await service.startConversationAsync();
   } catch (e) {
-    console.error('Upstream connect failed, closing WS:', e);
+    // console.error('Upstream connect failed, closing WS:', e);
     try { ws.close(1011); } catch {};
     currentVoiceLiveHandler = null; // Clear on connection failure
     return;
@@ -393,18 +393,18 @@ wss.on('connection', async (ws, request) => {
     console.info('WS client disconnected');
     if (currentVoiceLiveHandler === service) {
       // Don't clear immediately - wait for potential ACS CallDisconnected event
-      console.info('🎬 [DEBUG] Scheduling delayed handler cleanup (waiting for ACS events)');
+      // console.info('🎬 [DEBUG] Scheduling delayed handler cleanup (waiting for ACS events)');
       
       if (handlerFinalizationTimeout) {
         clearTimeout(handlerFinalizationTimeout);
       }
       
       handlerFinalizationTimeout = setTimeout(async () => {
-        console.info('🎬 [DEBUG] Timeout reached - finalizing recording due to WebSocket close');
+        // console.info('🎬 [DEBUG] Timeout reached - finalizing recording due to WebSocket close');
         if (currentVoiceLiveHandler === service) {
           try {
             await service.finalizeRecording();
-            console.info('🎬 [RECORDING] Recording finalized successfully (WebSocket close timeout)');
+            // console.info('🎬 [RECORDING] Recording finalized successfully (WebSocket close timeout)');
           } catch (e) {
             console.error('🎬 [RECORDING] Error finalizing recording (WebSocket close timeout):', e);
           }

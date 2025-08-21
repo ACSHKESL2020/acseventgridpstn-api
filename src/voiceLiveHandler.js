@@ -19,7 +19,7 @@ export class VoiceLiveCommunicationHandler {
     this.activeWebsocket = ws;
     this.conversationCallId = cryptoRandomUuid();
     this.callerId = callerId; // Store caller ID for session creation
-    console.log(`🎬 [DEBUG] VoiceLiveHandler created with callerId: ${callerId} for session: ${this.conversationCallId}`);
+    //console.log(`🎬 [DEBUG] VoiceLiveHandler created with callerId: ${callerId} for session: ${this.conversationCallId}`);
     this.isConnected = false;
     this.isAgentMode = true;
     this._voiceOverrideSent = false;
@@ -295,7 +295,7 @@ export class VoiceLiveCommunicationHandler {
         this._currentResponseId = null;
         this._isStreamingAudio = false;
         this._responseItems = [];
-        console.info('AI response completed', responseId);
+        // console.info('AI response completed', responseId);
         break;
       case 'response.audio.delta':
         // Gate by current active response; drop stale audio frames
@@ -306,10 +306,10 @@ export class VoiceLiveCommunicationHandler {
             // Start recording on first audio chunk (like js_server)
             if (!this.audioState) {
               try {
-                console.log('🎬 [RECORDING] Starting recording for first assistant audio chunk');
+                // console.log('🎬 [RECORDING] Starting recording for first assistant audio chunk');
                 const { sessionId, outPath } = startRecording(this.conversationCallId);
                 this.audioState = { sessionId, outPath, startedAt: new Date() };
-                console.log('🎬 [RECORDING] Recording started:', { sessionId, outPath });
+                // console.log('🎬 [RECORDING] Recording started:', { sessionId, outPath });
                 try {
                   await Sessions.updateOne({ sessionId: this.conversationCallId }, { $setOnInsert: { sessionId: this.conversationCallId, startedAt: new Date(), status: 'active', channel: 'PSTN', callerId: this.callerId } }, { upsert: true });
                 } catch (e) {
@@ -321,7 +321,7 @@ export class VoiceLiveCommunicationHandler {
             }
             
             const abuf = (typeof message.delta === 'string') ? Buffer.from(message.delta, 'base64') : Buffer.from(message.delta);
-            console.log(`🎬 [RECORDING] Writing assistant audio: ${abuf.length} bytes`);
+            // console.log(`🎬 [RECORDING] Writing assistant audio: ${abuf.length} bytes`);
             try { 
               writePcm(this.conversationCallId, abuf); 
             } catch (e) {
@@ -365,7 +365,7 @@ export class VoiceLiveCommunicationHandler {
   async _handleUserInterruption(newItemId) {
     // Ensure we only handle one interruption per speech event
     if (this._interruptionHandled) {
-      console.info('Interruption already handled for current speech, skipping', newItemId);
+      // console.info('Interruption already handled for current speech, skipping', newItemId);
       return;
     }
     this._interruptionHandled = true;
@@ -404,7 +404,6 @@ export class VoiceLiveCommunicationHandler {
     try {
       if (!this.audioState) {
         try {
-          console.log('🎬 [RECORDING] Starting recording for first user audio chunk');
           const { sessionId, outPath } = startRecording(this.conversationCallId);
           this.audioState = { sessionId, outPath, startedAt: new Date() };
           console.log('🎬 [RECORDING] Recording started:', { sessionId, outPath });
@@ -423,7 +422,6 @@ export class VoiceLiveCommunicationHandler {
       else if (Buffer.isBuffer(audioData)) buf = audioData;
       else buf = Buffer.from(audioData);
       
-      console.log(`🎬 [RECORDING] Writing user audio: ${buf.length} bytes`);
       try { 
         writePcm(this.conversationCallId, buf); 
       } catch (e) {
@@ -455,7 +453,7 @@ export class VoiceLiveCommunicationHandler {
       console.log('🎬 [RECORDING] Finalizing recording');
       try {
         const rec = await stopRecording(this.conversationCallId);
-        console.log('🎬 [RECORDING] Stop recording result:', rec ? `File created: ${rec.outPath}` : 'No file (too small)');
+        // console.log('🎬 [RECORDING] Stop recording result:', rec ? `File created: ${rec.outPath}` : 'No file (too small)');
         if (rec && rec.outPath) {
           try {
             const date = new Date();
@@ -463,9 +461,9 @@ export class VoiceLiveCommunicationHandler {
             const m = String(date.getUTCMonth() + 1).padStart(2, '0');
             const d = String(date.getUTCDate()).padStart(2, '0');
             const blobName = `recordings/${y}/${m}/${d}/${this.conversationCallId}.ogg`;
-            console.log('🎬 [RECORDING] Uploading to blob:', blobName);
+            // console.log('🎬 [RECORDING] Uploading to blob:', blobName);
             const meta = await uploadFile(rec.outPath, blobName);
-            console.log('🎬 [RECORDING] Upload successful:', meta.url);
+            // console.log('🎬 [RECORDING] Upload successful:', meta.url);
             try {
               await Sessions.updateOne({ sessionId: this.conversationCallId }, { $set: { finalRecordingUrl: meta.url, 'audio.recordingBlobName': meta.blobName, 'audio.codec': 'opus', 'audio.sampleRate': 24000, 'audio.sha256': meta.sha256, 'audio.etag': meta.etag, 'audio.sizeBytes': meta.sizeBytes, endedAt: new Date(), status: 'completed' } });
               console.log('🎬 [RECORDING] Session status updated to completed');
@@ -483,10 +481,10 @@ export class VoiceLiveCommunicationHandler {
             }
           }
         } else {
-          console.log('🎬 [RECORDING] No recording file to upload (too small), updating session status');
+          // console.log('🎬 [RECORDING] No recording file to upload (too small), updating session status');
           try {
             await Sessions.updateOne({ sessionId: this.conversationCallId }, { $set: { endedAt: new Date(), status: 'completed' } });
-            console.log('🎬 [RECORDING] Session status updated to completed (no recording)');
+            // console.log('🎬 [RECORDING] Session status updated to completed (no recording)');
           } catch (e) {
             console.error('Failed to update session status', e);
           }
@@ -496,7 +494,7 @@ export class VoiceLiveCommunicationHandler {
         // Still try to update session status
         try {
           await Sessions.updateOne({ sessionId: this.conversationCallId }, { $set: { endedAt: new Date(), status: 'error' } });
-          console.log('🎬 [RECORDING] Session status updated to error');
+          // console.log('🎬 [RECORDING] Session status updated to error');
         } catch (e2) {
           console.error('Failed to update session status to error', e2);
         }
@@ -505,10 +503,10 @@ export class VoiceLiveCommunicationHandler {
         this.audioState = null;
       }
     } else {
-      console.log('🎬 [RECORDING] No audio state found, updating session status anyway');
+      // console.log('🎬 [RECORDING] No audio state found, updating session status anyway');
       try {
         await Sessions.updateOne({ sessionId: this.conversationCallId }, { $set: { endedAt: new Date(), status: 'completed' } });
-        console.log('🎬 [RECORDING] Session status updated to completed (no audio state)');
+        // console.log('🎬 [RECORDING] Session status updated to completed (no audio state)');
       } catch (e) {
         console.error('Failed to update session status', e);
       }

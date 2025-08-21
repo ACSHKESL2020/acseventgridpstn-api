@@ -26,7 +26,6 @@ export function writePcm(sessionId, buffer) {
 	// Push to FIFO queue with a timestamp to preserve chronological order
 	s.queue.push({ buffer, ts: Date.now() });
 	s.totalBytes = (s.totalBytes || 0) + buffer.length;
-	console.log(`🎬 [RECORDER] Queued ${buffer.length} bytes for session ${sessionId} (total: ${s.totalBytes} bytes, queue: ${s.queue.length})`);
 	// Kick off processing if not already running
 	if (!s.processing) {
 		processQueue(sessionId).catch((e) => {
