@@ -1,6 +1,9 @@
 # Node 20 base image for Azure Container Apps
 FROM node:20-alpine
 
+# Install FFmpeg for audio recording/encoding
+RUN apk add --no-cache ffmpeg
+
 # Create app directory
 WORKDIR /usr/src/app
 
